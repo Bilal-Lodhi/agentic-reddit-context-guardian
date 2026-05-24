@@ -1,6 +1,7 @@
 import { assertT1 } from '@devvit/shared';
 import { context, reddit } from '@devvit/web/server';
 import type { OnCommentCreateRequest } from '@devvit/web/shared';
+import { buildOpenRouterRequestBody } from '../shared/openrouter-config.js';
 
 // ---------------------------------------------------------------------------
 // Runtime‑injected Devvit plugin types
@@ -33,7 +34,7 @@ function getFetch(): PluginFetch {
 // Types
 // ---------------------------------------------------------------------------
 
-type GeminiModerationResult = {
+type AIContentModerationResult = {
   violatesRules: boolean;
   reason: string;
 };
@@ -56,11 +57,14 @@ const SYSTEM_INSTRUCTION =
   'Do not output markdown backticks.';
 
 // ---------------------------------------------------------------------------
-// Settings key — moderators paste their Gemini key into the Reddit App
-// Directory settings dashboard.
+// OpenRouter API constants
 // ---------------------------------------------------------------------------
 
-const GEMINI_API_KEY_SETTING = 'geminiApiKey';
+const OPENROUTER_CHAT_URL = 'https://openrouter.ai/api/v1/chat/completions';
+
+// Settings key — moderators paste their OpenRouter key into the Reddit App
+// Directory settings dashboard.
+const OPENROUTER_API_KEY_SETTING = 'openrouterApiKey';
 
 // ---------------------------------------------------------------------------
 // Optional MongoDB audit-log sidecar (Render endpoint — non‑blocking).
@@ -74,12 +78,12 @@ const AUDIT_LOG_ENDPOINT =
 // ---------------------------------------------------------------------------
 
 /**
- * Resolve the Gemini API key from Devvit settings.
+ * Resolve the OpenRouter API key from Devvit settings.
  * Falls back to an empty string so the caller can produce a clear error.
  */
-async function getGeminiApiKey(): Promise<string> {
+async function getOpenRouterApiKey(): Promise<string> {
   try {
-    const raw = await getSettings().get(GEMINI_API_KEY_SETTING);
+    const raw = await getSettings().get(OPENROUTER_API_KEY_SETTING);
     if (typeof raw === 'string' && raw.trim().length > 0) {
       return raw.trim();
     }
@@ -90,66 +94,57 @@ async function getGeminiApiKey(): Promise<string> {
 }
 
 /**
- * Call the Gemini 2.5 Flash API directly via the Devvit‑sanctioned
+ * Call the OpenRouter chat completions API via the Devvit‑sanctioned
  * `context.fetch` proxy.  This keeps the entire moderation pipeline inside
  * the Devvit serverless sandbox with zero external middleware dependency.
+ *
+ * The model and thinking mode are controlled by `src/shared/openrouter-config.ts`.
+ * The API key is read from the Devvit App Directory settings (no hardcoding).
  */
-async function analyzeWithGemini(
+async function analyzeWithAI(
   apiKey: string,
   commentBody: string,
-): Promise<GeminiModerationResult> {
-  const url =
-    'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=' +
-    encodeURIComponent(apiKey);
+): Promise<AIContentModerationResult> {
+  const requestBody = buildOpenRouterRequestBody(SYSTEM_INSTRUCTION, commentBody);
 
-  const requestBody = {
-    system_instruction: {
-      parts: [{ text: SYSTEM_INSTRUCTION }],
-    },
-    contents: [
-      {
-        parts: [{ text: commentBody }],
-      },
-    ],
-    generationConfig: {
-      responseMimeType: 'application/json',
-    },
-  };
-
-  const response = await getFetch()(url, {
+  const response = await getFetch()(OPENROUTER_CHAT_URL, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${apiKey}`,
+    },
     body: JSON.stringify(requestBody),
   });
 
   if (!response.ok) {
     throw new Error(
-      `Gemini API returned status ${response.status}: ${response.statusText}`,
+      `OpenRouter API returned status ${response.status}: ${response.statusText}`,
     );
   }
 
+  // OpenRouter chat-completion response shape:
+  // { choices: [{ message: { content: "..." } }] }
   const json = (await response.json()) as {
-    candidates?: Array<{
-      content?: {
-        parts?: Array<{ text?: string }>;
+    choices?: Array<{
+      message?: {
+        content?: string;
       };
     }>;
   };
 
-  const parts = json.candidates?.[0]?.content?.parts;
-  const rawText = parts?.[0]?.text;
+  const rawText = json.choices?.[0]?.message?.content;
 
   if (!rawText) {
-    throw new Error('Gemini returned an empty response body');
+    throw new Error('OpenRouter returned an empty response body');
   }
 
-  const parsed = JSON.parse(rawText) as GeminiModerationResult;
+  const parsed = JSON.parse(rawText) as AIContentModerationResult;
 
   if (typeof parsed.violatesRules !== 'boolean') {
-    throw new Error('Gemini response missing "violatesRules" boolean field');
+    throw new Error('OpenRouter response missing "violatesRules" boolean field');
   }
   if (typeof parsed.reason !== 'string') {
-    throw new Error('Gemini response missing "reason" string field');
+    throw new Error('OpenRouter response missing "reason" string field');
   }
 
   // Normalize empty / whitespace-only reasons with sensible fallbacks
@@ -212,17 +207,17 @@ export async function handleCommentCreate(
   const authorUsername: string = comment.author;
 
   try {
-    const geminiKey = await getGeminiApiKey();
+    const openrouterKey = await getOpenRouterApiKey();
 
-    if (!geminiKey) {
+    if (!openrouterKey) {
       return {
         status: 'error',
         message:
-          'Gemini API key is not configured. A subreddit moderator must set the key in the App Directory settings dashboard before the bot can evaluate comments.',
+          'OpenRouter API key is not configured. A subreddit moderator must set the key in the App Directory settings dashboard before the bot can evaluate comments.',
       };
     }
 
-    const result = await analyzeWithGemini(geminiKey, commentBody);
+    const result = await analyzeWithAI(openrouterKey, commentBody);
 
     // Fire-and-forget audit log (never blocks the moderation action)
     logToAuditTrail({

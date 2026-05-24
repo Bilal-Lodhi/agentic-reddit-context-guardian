@@ -1,17 +1,27 @@
-import { GoogleGenAI } from '@google/genai';
 import express, { type Request, type Response } from 'express';
 import { MongoClient, type Collection } from 'mongodb';
+import {
+  buildOpenRouterRequestBody,
+  OPENROUTER_MODEL,
+  OPENROUTER_THINKING,
+} from './openrouter-config.js';
+
+// ============================================================================
+// Environment
+// ============================================================================
 
 const PORT = parseInt(process.env.PORT ?? '3000', 10);
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
 const MONGO_URI = process.env.MONGO_URI;
 
-if (!GEMINI_API_KEY) {
-  console.error('FATAL: GEMINI_API_KEY environment variable is not set');
+if (!OPENROUTER_API_KEY) {
+  console.error('FATAL: OPENROUTER_API_KEY environment variable is not set');
   process.exit(1);
 }
 
-const genai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
+// ============================================================================
+// Types
+// ============================================================================
 
 type AnalyzeCommentPayload = {
   commentId: string;
@@ -25,10 +35,20 @@ type ModerationLogDocument = AnalyzeCommentPayload & {
   evaluatedAt: Date;
 };
 
+// ============================================================================
+// Constants
+// ============================================================================
+
+const OPENROUTER_CHAT_URL = 'https://openrouter.ai/api/v1/chat/completions';
+
 const SYSTEM_INSTRUCTION =
   'You are an autonomous AI content moderator. Evaluate context. ' +
   'Respond strictly in valid JSON format with keys "violatesRules" (boolean) and "reason" (string, max 15 words). ' +
   'Do not output markdown backticks.';
+
+// ============================================================================
+// MongoDB
+// ============================================================================
 
 let moderationLogs: Collection<ModerationLogDocument> | null = null;
 
@@ -49,41 +69,56 @@ async function connectMongo(): Promise<void> {
   }
 }
 
-async function analyzeWithGemini(body: string): Promise<{ violatesRules: boolean; reason: string }> {
-  const response = await genai.models.generateContent({
-    model: 'gemini-2.5-flash',
-    contents: body,
-    config: {
-      systemInstruction: SYSTEM_INSTRUCTION,
-      responseMimeType: 'application/json',
+// ============================================================================
+// AI Moderation (OpenRouter)
+// ============================================================================
+
+/**
+ * Sends the comment body to OpenRouter for moderation evaluation.
+ *
+ * The model and reasoning/thinking depth are controlled by the
+ * `openrouter-config.ts` file.  The API key is read from the
+ * OPENROUTER_API_KEY environment variable (set in .env).
+ */
+async function analyzeWithAI(body: string): Promise<{ violatesRules: boolean; reason: string }> {
+  const requestBody = buildOpenRouterRequestBody(SYSTEM_INSTRUCTION, body);
+
+  const response = await fetch(OPENROUTER_CHAT_URL, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${OPENROUTER_API_KEY}`,
     },
+    body: JSON.stringify(requestBody),
   });
 
-  if (!response.candidates || response.candidates.length === 0) {
-    throw new Error('Gemini returned no candidates');
+  if (!response.ok) {
+    const errorText = await response.text().catch(() => 'Unknown error');
+    throw new Error(`OpenRouter API returned status ${response.status}: ${errorText}`);
   }
 
-  const candidate = response.candidates[0];
-  if (!candidate.content?.parts || candidate.content.parts.length === 0) {
-    throw new Error('Gemini returned no content parts');
-  }
+  // OpenRouter chat-completion response shape:
+  // { choices: [{ message: { content: "..." } }] }
+  const json = (await response.json()) as {
+    choices?: Array<{ message?: { content?: string } }>;
+  };
 
-  const rawText = candidate.content.parts[0].text;
+  const rawText = json.choices?.[0]?.message?.content;
+
   if (!rawText) {
-    throw new Error('Gemini returned empty text');
+    throw new Error('OpenRouter returned an empty response body');
   }
 
   const parsed = JSON.parse(rawText) as { violatesRules: boolean; reason: string };
 
   if (typeof parsed.violatesRules !== 'boolean') {
-    throw new Error('Gemini response missing "violatesRules" boolean field');
+    throw new Error('OpenRouter response missing "violatesRules" boolean field');
   }
   if (typeof parsed.reason !== 'string') {
-    throw new Error('Gemini response missing "reason" string field');
+    throw new Error('OpenRouter response missing "reason" string field');
   }
 
   // Normalize empty or whitespace-only reasons with a sensible fallback.
-  // Gemini occasionally returns "" for safe comments — fill the gap.
   const reason = parsed.reason.trim();
   const normalizedReason =
     reason.length > 0
@@ -95,6 +130,10 @@ async function analyzeWithGemini(body: string): Promise<{ violatesRules: boolean
   return { violatesRules: parsed.violatesRules, reason: normalizedReason };
 }
 
+// ============================================================================
+// MongoDB audit logging
+// ============================================================================
+
 async function logToMongo(document: ModerationLogDocument): Promise<void> {
   if (!moderationLogs) {
     return;
@@ -105,6 +144,10 @@ async function logToMongo(document: ModerationLogDocument): Promise<void> {
     console.error('Failed to insert moderation log into MongoDB:', err);
   }
 }
+
+// ============================================================================
+// Express server
+// ============================================================================
 
 async function main(): Promise<void> {
   const app = express();
@@ -123,7 +166,7 @@ async function main(): Promise<void> {
         return;
       }
 
-      const evaluation = await analyzeWithGemini(body);
+      const evaluation = await analyzeWithAI(body);
 
       const logDocument: ModerationLogDocument = {
         commentId,
@@ -153,6 +196,9 @@ async function main(): Promise<void> {
 
   app.listen(PORT, () => {
     console.log(`Context Guardian Backend listening on port ${PORT}`);
+    console.log(`  → AI Provider : OpenRouter`);
+    console.log(`  → Model       : ${OPENROUTER_MODEL}`);
+    console.log(`  → Thinking    : ${OPENROUTER_THINKING}`);
   });
 }
 

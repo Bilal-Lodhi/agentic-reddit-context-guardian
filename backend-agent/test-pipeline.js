@@ -1,7 +1,7 @@
 /**
  * test-pipeline.js — 150-Adversarial Stress-Test Harness
  *
- * Targets the Gemini moderation endpoint on Render in serial batches of
+ * Targets the OpenRouter-powered moderation endpoint on Render in serial batches of
  * 1 request, separated by 15s cool-down to respect the 5 RPM quota.
  *
  * Usage:
@@ -330,7 +330,7 @@ function printReport() {
   console.log("║    150-ADVERSARIAL STRESS TEST — FINAL REPORT       ║");
   console.log("╠══════════════════════════════════════════════════════╣");
   console.log(`║  Endpoint          : ${ENDPOINT}`);
-  console.log(`║  Model             : gemini-2.5-flash`);
+  console.log(`║  Model             : OpenRouter (see openrouter-config.ts)`);
   console.log("╠══════════════════════════════════════════════════════╣");
   console.log(`║  Elapsed time      : ${elapsedSec.padStart(7)} s                    ║`);
   console.log("╠══════════════════════════════════════════════════════╣");
@@ -362,7 +362,7 @@ function printReport() {
     adversarialMismatches <= 15;
 
   if (allGood) {
-    console.log("\n✅ ADVERSARIAL STRESS TEST PASSED — Gemini pipeline is production-ready.");
+    console.log("\n✅ ADVERSARIAL STRESS TEST PASSED — OpenRouter pipeline is production-ready.");
     process.exit(0);
   } else {
     console.log("\n⚠️  ADVERSARIAL STRESS TEST COMPLETED WITH WARNINGS — Review category breakdown above.");

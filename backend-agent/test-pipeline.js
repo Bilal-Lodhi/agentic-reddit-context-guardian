@@ -1,17 +1,39 @@
 /**
  * test-pipeline.js — 150-Adversarial Stress-Test Harness
  *
- * Targets the OpenRouter-powered moderation endpoint on Render in serial batches of
- * 1 request, separated by 15s cool-down to respect the 5 RPM quota.
+ * Targets the OpenRouter-powered moderation endpoint on Render in parallel batches.
+ * Tune BATCH_SIZE and BATCH_COOLDOWN_MS below to match your OpenRouter rate limits.
  *
  * Usage:
  *   node test-pipeline.js
  */
 
-const ENDPOINT = "https://onrender.com/api/analyze-comment";
+/**
+ * TUNING GUIDE
+ * ─────────────────────────────────────────────────────────
+ * These knobs control how fast the 150-request stress test runs.
+ *
+ * BATCH_SIZE         — number of requests fired in parallel each step.
+ *                      Paid OpenRouter models can comfortably handle
+ *                      10-20 concurrent requests without issues.
+ *                      (Start at 10; raise if you see zero errors.)
+ *
+ * BATCH_COOLDOWN_MS  — pause (ms) between batches.  With a paid model
+ *                      this can be very short — 500-1000 ms is plenty.
+ *                      Set to 0 to blast through at maximum speed.
+ *
+ * If you see 429 (Rate Limited) or 5xx errors from OpenRouter,
+ * reduce BATCH_SIZE and/or increase BATCH_COOLDOWN_MS.
+ * ─────────────────────────────────────────────────────────
+ */
+// Point this at your running local server, or at your Render deployment.
+// Local:  "http://localhost:3000/api/analyze-comment"
+// Render: "https://agentic-reddit-context-guardian.onrender.com/api/analyze-comment"
+// Run `npm run dev` FIRST if testing locally.
+const ENDPOINT = "https://agentic-reddit-context-guardian.onrender.com/api/analyze-comment";
 const TOTAL_REQUESTS = 150;
-const BATCH_SIZE = 1;
-const BATCH_COOLDOWN_MS = 15000;
+const BATCH_SIZE = 10;         // paid OpenRouter → 10 concurrent is safe
+const BATCH_COOLDOWN_MS = 500; // paid model → 0.5s gap is plenty
 
 // ─────────────────────────────────────────────────────────
 // 1. Payload catalog (150 items across 3 categories)

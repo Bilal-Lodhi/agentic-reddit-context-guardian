@@ -7,7 +7,17 @@ type ModerationApiResponse = {
   reason: string;
 };
 
-const MODERATION_API_ENDPOINT = 'https://onrender.com/api/analyze-comment';
+// ─────────────────────────────────────────────────────────
+// POST-DEPLOYMENT SWAP: Once Render deploys the backend,
+// replace the entire string below with:
+//
+//   https://context-guardian-backend.onrender.com/api/analyze-comment
+//
+// The Render service name is defined in /render.yaml as
+// `name: context-guardian-backend`.  Render automatically
+// provisions the subdomain `<service-name>.onrender.com`.
+// ─────────────────────────────────────────────────────────
+const MODERATION_API_ENDPOINT = 'http://localhost:3000/api/analyze-comment';
 
 async function checkCommentForViolations(
   commentId: string,

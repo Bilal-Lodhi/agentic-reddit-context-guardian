@@ -51,7 +51,7 @@ async function connectMongo(): Promise<void> {
 
 async function analyzeWithGemini(body: string): Promise<{ violatesRules: boolean; reason: string }> {
   const response = await genai.models.generateContent({
-    model: 'gemini-1.5-flash',
+    model: 'gemini-2.5-flash',
     contents: body,
     config: {
       systemInstruction: SYSTEM_INSTRUCTION,

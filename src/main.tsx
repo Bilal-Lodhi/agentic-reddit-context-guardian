@@ -22,13 +22,18 @@ type PluginFetch = (
   init?: RequestInit,
 ) => Promise<Response>;
 
-// Safe, typed accessors that internally grab the Proxy‑backed properties.
+// Lazy typed accessors — must NOT touch the `context` Proxy at module load
+// time because it throws "No context found" outside of a server request.
 // Casting through `unknown` avoids polluting the global `Context` type.
-const settings = (context as unknown as Record<string, unknown>)
-  .settings as PluginSettings;
+function getSettings(): PluginSettings {
+  return (context as unknown as Record<string, unknown>)
+    .settings as PluginSettings;
+}
 
-const fetch = (context as unknown as Record<string, unknown>)
-  .fetch as PluginFetch;
+function getFetch(): PluginFetch {
+  return (context as unknown as Record<string, unknown>)
+    .fetch as PluginFetch;
+}
 
 // ---------------------------------------------------------------------------
 // Types
@@ -80,7 +85,7 @@ const AUDIT_LOG_ENDPOINT =
  */
 async function getGeminiApiKey(): Promise<string> {
   try {
-    const raw = await settings.get(GEMINI_API_KEY_SETTING);
+    const raw = await getSettings().get(GEMINI_API_KEY_SETTING);
     if (typeof raw === 'string' && raw.trim().length > 0) {
       return raw.trim();
     }
@@ -117,7 +122,7 @@ async function analyzeWithGemini(
     },
   };
 
-  const response = await fetch(url, {
+  const response = await getFetch()(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(requestBody),
@@ -170,7 +175,7 @@ async function analyzeWithGemini(
  * Failures are silently swallowed so the moderation flow is never blocked.
  */
 function logToAuditTrail(payload: AuditLogPayload): void {
-  fetch(AUDIT_LOG_ENDPOINT, {
+  getFetch()(AUDIT_LOG_ENDPOINT, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({

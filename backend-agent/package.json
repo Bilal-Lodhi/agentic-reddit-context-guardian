@@ -1,0 +1,21 @@
+{
+  "name": "context-guardian-backend",
+  "version": "1.0.0",
+  "main": "dist/server.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/server.js",
+    "dev": "ts-node server.ts"
+  },
+  "dependencies": {
+    "@google/genai": "^0.1.1",
+    "express": "^4.19.2",
+    "mongodb": "^6.5.0"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.21",
+    "@types/node": "^20.11.30",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.4.3"
+  }
+}

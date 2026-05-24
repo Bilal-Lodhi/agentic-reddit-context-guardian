@@ -7,15 +7,21 @@ type ModerationApiResponse = {
   reason: string;
 };
 
-const MODERATION_API_ENDPOINT = 'https://api.example.com/moderation/check';
+const MODERATION_API_ENDPOINT = 'https://onrender.com/api/analyze-comment';
 
 async function checkCommentForViolations(
+  commentId: string,
+  authorUsername: string,
   commentBody: string,
 ): Promise<ModerationApiResponse> {
   const response = await fetch(MODERATION_API_ENDPOINT, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ comment: commentBody }),
+    body: JSON.stringify({
+      commentId,
+      author: authorUsername,
+      body: commentBody,
+    }),
   });
 
   if (!response.ok) {
@@ -57,7 +63,11 @@ export async function handleCommentCreate(
   const authorUsername: string = comment.author;
 
   try {
-    const result = await checkCommentForViolations(commentBody);
+    const result = await checkCommentForViolations(
+      commentId,
+      authorUsername,
+      commentBody,
+    );
 
     if (result.violatesRules) {
       assertT1(commentId);

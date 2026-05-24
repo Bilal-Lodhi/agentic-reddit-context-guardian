@@ -38,6 +38,15 @@
   "forms": {
     "exampleForm": "/internal/form/example-submit"
   },
+  "settings": {
+    "global": {
+      "openrouterApiKey": {
+        "type": "string",
+        "label": "OpenRouter API Key",
+        "helpText": "Get your key at https://openrouter.ai/keys"
+      }
+    }
+  },
   "triggers": {
     "onAppInstall": "/internal/triggers/on-app-install",
     "onCommentCreate": "/internal/triggers/on-comment-create"

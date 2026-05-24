@@ -1,5 +1,6 @@
 import { assertT1 } from '@devvit/shared';
 import { context, reddit } from '@devvit/web/server';
+import { settings } from '@devvit/settings';
 import type { OnCommentCreateRequest } from '@devvit/web/shared';
 import { buildOpenRouterRequestBody } from '../shared/openrouter-config.js';
 
@@ -7,24 +8,15 @@ import { buildOpenRouterRequestBody } from '../shared/openrouter-config.js';
 // Runtime‑injected Devvit plugin types
 // ---------------------------------------------------------------------------
 
-type PluginSettings = {
-  get<T = string | number | boolean | string[] | undefined>(
-    name: string,
-  ): Promise<T | undefined>;
-};
-
 type PluginFetch = (
   input: RequestInfo | URL,
   init?: RequestInit,
 ) => Promise<Response>;
 
-// Lazy typed accessors — must NOT touch the `context` Proxy at module load
-// time because it throws "No context found" outside of a server request.
-function getSettings(): PluginSettings {
-  return (context as unknown as Record<string, unknown>)
-    .settings as PluginSettings;
-}
-
+// `settings` is a pre‑instantiated SettingsClient singleton exported by
+// `@devvit/settings`. It requires a Devvit request context to function,
+// so we only reference it inside async handler bodies — NEVER at module
+// load time.
 function getFetch(): PluginFetch {
   return (context as unknown as Record<string, unknown>)
     .fetch as PluginFetch;
@@ -83,7 +75,7 @@ const AUDIT_LOG_ENDPOINT =
  */
 async function getOpenRouterApiKey(): Promise<string> {
   try {
-    const raw = await getSettings().get(OPENROUTER_API_KEY_SETTING);
+    const raw = await settings.get(OPENROUTER_API_KEY_SETTING);
     if (typeof raw === 'string' && raw.trim().length > 0) {
       return raw.trim();
     }

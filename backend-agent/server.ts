@@ -82,7 +82,17 @@ async function analyzeWithGemini(body: string): Promise<{ violatesRules: boolean
     throw new Error('Gemini response missing "reason" string field');
   }
 
-  return { violatesRules: parsed.violatesRules, reason: parsed.reason };
+  // Normalize empty or whitespace-only reasons with a sensible fallback.
+  // Gemini occasionally returns "" for safe comments — fill the gap.
+  const reason = parsed.reason.trim();
+  const normalizedReason =
+    reason.length > 0
+      ? reason
+      : parsed.violatesRules
+        ? 'Content violates community guidelines'
+        : 'Content complies with community guidelines';
+
+  return { violatesRules: parsed.violatesRules, reason: normalizedReason };
 }
 
 async function logToMongo(document: ModerationLogDocument): Promise<void> {

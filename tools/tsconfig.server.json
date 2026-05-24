@@ -6,9 +6,9 @@
     "customConditions": [],
     "types": ["node"],
     "exactOptionalPropertyTypes": false,
-    "rootDir": "../src/server"
+    "rootDir": "../src"
   },
-  "include": ["../src/server/**/*"],
+  "include": ["../src/server/**/*", "../src/main.tsx"],
   "exclude": [],
   "references": [
     {

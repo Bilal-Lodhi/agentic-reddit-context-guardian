@@ -17,7 +17,7 @@ const AUDIT_REDIS_TTL_SECONDS = 30 * 24 * 60 * 60;
 
 const SYSTEM_INSTRUCTION =
   'You are an autonomous AI content moderator. Evaluate content. ' +
-  'Respond strictly in valid JSON format with keys "violatesRules" (boolean) and "reason" (string, max 15 words). ' +
+  'Respond strictly in valid JSON format with keys "violatesRules" (boolean) and "reason" (string, max 10 words, under 70 characters). ' +
   'Do not output markdown backticks.';
 
 /** Maximum time (ms) to wait for a Gemini API response before giving up. */

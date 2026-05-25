@@ -25,6 +25,8 @@ Gemini 2.5 Flash evaluates the comment
 
 Everything runs inside Devvit's serverless runtime. No external backend. No database server. No Render.
 
+Each Gemini API call is guarded by a **4s timeout**, **3 retries** with jittered exponential backoff (800ms → 1.6s → 3.2s ±30%), and a **30-day Redis audit trail**.
+
 ---
 
 ## 🧪 150-Adversarial Stress Test

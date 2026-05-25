@@ -20,6 +20,9 @@ const SYSTEM_INSTRUCTION =
   'Respond strictly in valid JSON format with keys "violatesRules" (boolean) and "reason" (string, max 15 words). ' +
   'Do not output markdown backticks.';
 
+/** Maximum time (ms) to wait for a Gemini API response before giving up. */
+const GEMINI_TIMEOUT_MS = 4000;
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -65,13 +68,22 @@ async function analyzeWithAI(
 
   const requestBody = buildGeminiRequestBody(SYSTEM_INSTRUCTION, commentBody);
 
-  const response = await fetch(geminiUrl(apiKey), {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(requestBody),
-  });
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), GEMINI_TIMEOUT_MS);
+
+  let response: Response;
+  try {
+    response = await fetch(geminiUrl(apiKey), {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(requestBody),
+      signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(timeoutId);
+  }
 
   if (!response.ok) {
     const errorText = await response.text().catch(() => 'Unknown error');

@@ -6,7 +6,7 @@ services:
     buildCommand: npm install && npm run build
     startCommand: node dist/server.js
     envVars:
-      - key: GEMINI_API_KEY
+      - key: OPENROUTER_API_KEY
         sync: false
       - key: MONGO_URI
         sync: false

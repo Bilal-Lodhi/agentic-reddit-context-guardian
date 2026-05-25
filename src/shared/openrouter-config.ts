@@ -1,65 +1,79 @@
 /**
  * ============================================================================
- * OpenRouter Configuration (Shared — used by Devvit server code)
+ * Google Gemini Configuration (Shared — used by Devvit server code)
  * ============================================================================
  *
- * This is the shared copy of `backend-agent/openrouter-config.ts`.
- * Keep both files in sync when you change the model or thinking mode.
+ * Calls the Google Gemini native REST API via the globally-approved Devvit
+ * domain `generativelanguage.googleapis.com`.
  *
  * 🚀 HOW TO CHANGE THE MODEL
  * ─────────────────────────────
- *   Change OPENROUTER_MODEL to any model ID from https://openrouter.ai/models.
+ *   Change GEMINI_MODEL to any Gemini model ID.
  *
  *   Examples:
- *     'google/gemini-2.5-flash'         ← Lightweight, fast
- *     'google/gemini-2.5-pro'           ← Stronger reasoning
- *     'google/gemini-3.1-flash'         ← Latest Gemini Flash
- *     'google/gemini-3.1-pro'           ← Latest Gemini Pro
- *     'anthropic/claude-3.5-haiku'      ← Fast Anthropic
- *     'openai/gpt-4o'                   ← OpenAI
- *
- * 🧠 HOW TO CHANGE THINKING / REASONING MODE
- * ─────────────────────────────────────────────
- *   Set OPENROUTER_THINKING to 'none', 'medium', or 'deep'.
- *   Set to 'none' to disable thinking entirely.
+ *     'gemini-2.0-flash'     ← Fast, lightweight
+ *     'gemini-2.5-flash'     ← Lightweight current-gen
+ *     'gemini-2.5-pro'       ← Stronger reasoning
  *
  * ⚠️  The API key is read from Devvit App settings (not hardcoded here).
+ *     OpenRouter keys route through Google's native endpoint when the
+ *     payload matches Google's schema.
  */
-
-export type ThinkingMode = 'none' | 'medium' | 'deep';
 
 // ── MODEL ─────────────────────────────────────────────────────────────────
-export const OPENROUTER_MODEL: string = 'google/gemini-2.5-flash';
-
-// ── THINKING ───────────────────────────────────────────────────────────────
-export const OPENROUTER_THINKING: ThinkingMode = 'none';
-
-// ── REASONING EFFORT MAPPING ───────────────────────────────────────────────
-export const REASONING_EFFORT_MAP: Record<ThinkingMode, string> = {
-  none: 'low',
-  medium: 'medium',
-  deep: 'high',
-};
+export const GEMINI_MODEL: string = 'gemini-2.5-flash';
 
 /**
- * Builds the OpenRouter chat-completion request body.
+ * Builds a Google Gemini native generateContent request body.
+ *
+ * Ref: https://ai.google.dev/api/generate-content#request-body
  */
-export function buildOpenRouterRequestBody(
+export function buildGeminiRequestBody(
   systemInstruction: string,
   commentBody: string,
 ): {
-  model: string;
-  messages: Array<{ role: 'system' | 'user'; content: string }>;
-  response_format: { type: 'json_object' };
-  reasoning?: { effort: string };
+  contents: Array<{
+    role: 'user';
+    parts: Array<{ text: string }>;
+  }>;
+  systemInstruction: {
+    parts: Array<{ text: string }>;
+  };
+  generationConfig: {
+    responseMimeType: 'application/json';
+    responseSchema: {
+      type: 'object';
+      properties: Record<string, { type: string; description?: string }>;
+      required: string[];
+    };
+  };
 } {
   return {
-    model: OPENROUTER_MODEL,
-    messages: [
-      { role: 'system', content: systemInstruction },
-      { role: 'user', content: commentBody },
+    contents: [
+      {
+        role: 'user',
+        parts: [{ text: commentBody }],
+      },
     ],
-    response_format: { type: 'json_object' },
-    reasoning: { effort: REASONING_EFFORT_MAP[OPENROUTER_THINKING] },
+    systemInstruction: {
+      parts: [{ text: systemInstruction }],
+    },
+    generationConfig: {
+      responseMimeType: 'application/json',
+      responseSchema: {
+        type: 'object',
+        properties: {
+          violatesRules: {
+            type: 'boolean',
+            description: 'Whether the content violates community guidelines',
+          },
+          reason: {
+            type: 'string',
+            description: 'Brief explanation of the moderation decision (max 15 words)',
+          },
+        },
+        required: ['violatesRules', 'reason'],
+      },
+    },
   };
 }

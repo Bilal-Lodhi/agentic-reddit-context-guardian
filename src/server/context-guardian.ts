@@ -1,181 +1,116 @@
 import { assertT1 } from '@devvit/shared';
-import { context, reddit } from '@devvit/web/server';
-import { settings } from '@devvit/settings';
+import { reddit, settings } from '@devvit/web/server';
 import type { OnCommentCreateRequest } from '@devvit/web/shared';
-import { buildOpenRouterRequestBody } from '../shared/openrouter-config.js';
+import { GEMINI_MODEL, buildGeminiRequestBody } from '../shared/openrouter-config';
 
 // ---------------------------------------------------------------------------
-// Runtime‑injected Devvit plugin types
+// Constants
 // ---------------------------------------------------------------------------
 
-type PluginFetch = (
-  input: RequestInfo | URL,
-  init?: RequestInit,
-) => Promise<Response>;
-
-// `settings` is a pre‑instantiated SettingsClient singleton exported by
-// `@devvit/settings`. It requires a Devvit request context to function,
-// so we only reference it inside async handler bodies — NEVER at module
-// load time.
-function getFetch(): PluginFetch {
-  return (context as unknown as Record<string, unknown>)
-    .fetch as PluginFetch;
-}
-
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
-
-type AIContentModerationResult = {
-  violatesRules: boolean;
-  reason: string;
-};
-
-type AuditLogPayload = {
-  commentId: string;
-  author: string;
-  body: string;
-  violatesRules: boolean;
-  reason: string;
-};
-
-// ---------------------------------------------------------------------------
-// System prompt — identical to the backend-agent for parity
-// ---------------------------------------------------------------------------
+const SETTINGS_KEY = 'openrouterApiKey';
 
 const SYSTEM_INSTRUCTION =
-  'You are an autonomous AI content moderator. Evaluate context. ' +
+  'You are an autonomous AI content moderator. Evaluate content. ' +
   'Respond strictly in valid JSON format with keys "violatesRules" (boolean) and "reason" (string, max 15 words). ' +
   'Do not output markdown backticks.';
-
-// ---------------------------------------------------------------------------
-// OpenRouter API constants
-// ---------------------------------------------------------------------------
-
-const OPENROUTER_CHAT_URL = 'https://openrouter.ai/api/v1/chat/completions';
-
-// Settings key — moderators paste their OpenRouter key into the Reddit App
-// Directory settings dashboard.
-const OPENROUTER_API_KEY_SETTING = 'openrouterApiKey';
-
-// ---------------------------------------------------------------------------
-// Optional MongoDB audit-log sidecar (Render endpoint — non‑blocking).
-// ---------------------------------------------------------------------------
-
-const AUDIT_LOG_ENDPOINT =
-  'https://agentic-reddit-context-guardian.onrender.com/api/audit-log';
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
 /**
- * Resolve the OpenRouter API key from Devvit settings.
- * Falls back to an empty string so the caller can produce a clear error.
+ * Build the Gemini native generateContent URL with API key as query parameter.
  */
-async function getOpenRouterApiKey(): Promise<string> {
+function geminiUrl(apiKey: string): string {
+  return `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`;
+}
+
+/**
+ * Resolve the API key from Devvit App Directory settings.
+ */
+async function getApiKey(): Promise<string> {
   try {
-    const raw = await settings.get(OPENROUTER_API_KEY_SETTING);
+    const raw = await settings.get(SETTINGS_KEY);
     if (typeof raw === 'string' && raw.trim().length > 0) {
       return raw.trim();
     }
-  } catch {
-    // Settings API unavailable — handled below
+  } catch (err) {
+    console.warn(`[Settings] Failed to read ${SETTINGS_KEY}:`, String(err));
   }
   return '';
 }
 
 /**
- * Call the OpenRouter chat completions API via the Devvit‑sanctioned
- * `context.fetch` proxy.  This keeps the entire moderation pipeline inside
- * the Devvit serverless sandbox with zero external middleware dependency.
- *
- * The model and thinking mode are controlled by `src/shared/openrouter-config.ts`.
- * The API key is read from the Devvit App Directory settings (no hardcoding).
+ * Call the Google Gemini API via Devvit's sanctioned `fetch`.
+ * `generativelanguage.googleapis.com` is on the global Devvit allowlist.
  */
 async function analyzeWithAI(
-  apiKey: string,
   commentBody: string,
-): Promise<AIContentModerationResult> {
-  const requestBody = buildOpenRouterRequestBody(SYSTEM_INSTRUCTION, commentBody);
+): Promise<{ violatesRules: boolean; reason: string }> {
+  const apiKey = await getApiKey();
 
-  const response = await getFetch()(OPENROUTER_CHAT_URL, {
+  if (!apiKey) {
+    throw new Error(
+      'API key is not configured. A subreddit moderator must set ' +
+      'the key in the App Directory settings dashboard before the bot can ' +
+      'evaluate comments.',
+    );
+  }
+
+  const requestBody = buildGeminiRequestBody(SYSTEM_INSTRUCTION, commentBody);
+
+  const response = await fetch(geminiUrl(apiKey), {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      Authorization: `Bearer ${apiKey}`,
     },
     body: JSON.stringify(requestBody),
   });
 
   if (!response.ok) {
+    const errorText = await response.text().catch(() => 'Unknown error');
     throw new Error(
-      `OpenRouter API returned status ${response.status}: ${response.statusText}`,
+      `Gemini API returned status ${response.status}: ${errorText}`,
     );
   }
 
-  // OpenRouter chat-completion response shape:
-  // { choices: [{ message: { content: "..." } }] }
+  // Gemini generateContent response shape:
+  // { candidates: [{ content: { parts: [{ text: "..." }] } }] }
   const json = (await response.json()) as {
-    choices?: Array<{
-      message?: {
-        content?: string;
-      };
+    candidates?: Array<{
+      content?: { parts?: Array<{ text?: string }> };
     }>;
   };
 
-  const rawText = json.choices?.[0]?.message?.content;
+  const rawText = json.candidates?.[0]?.content?.parts?.[0]?.text;
 
   if (!rawText) {
-    throw new Error('OpenRouter returned an empty response body');
+    throw new Error('Gemini returned an empty response body');
   }
 
-  const parsed = JSON.parse(rawText) as AIContentModerationResult;
+  const parsed = JSON.parse(rawText) as {
+    violatesRules: boolean;
+    reason: string;
+  };
 
   if (typeof parsed.violatesRules !== 'boolean') {
-    throw new Error('OpenRouter response missing "violatesRules" boolean field');
+    throw new Error(
+      'Gemini response missing "violatesRules" boolean field',
+    );
   }
   if (typeof parsed.reason !== 'string') {
-    throw new Error('OpenRouter response missing "reason" string field');
+    throw new Error('Gemini response missing "reason" string field');
   }
 
-  // Normalize empty / whitespace-only reasons with sensible fallbacks
-  const rawReason = parsed.reason.trim();
+  const reason = parsed.reason.trim();
   const normalizedReason =
-    rawReason.length > 0
-      ? rawReason
+    reason.length > 0
+      ? reason
       : parsed.violatesRules
         ? 'Content violates community guidelines'
         : 'Content complies with community guidelines';
 
   return { violatesRules: parsed.violatesRules, reason: normalizedReason };
-}
-
-/**
- * Fire-and-forget audit log → MongoDB via the optional Render sidecar.
- * Failures are silently swallowed so the moderation flow is never blocked.
- */
-function logToAuditTrail(payload: AuditLogPayload): void {
-  getFetch()(AUDIT_LOG_ENDPOINT, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      ...payload,
-      evaluatedAt: new Date().toISOString(),
-    }),
-  })
-    .then((res: Response) => {
-      if (!res.ok) {
-        console.warn(
-          `[Audit] Sidecar write returned ${res.status} for comment ${payload.commentId}`,
-        );
-      }
-    })
-    .catch((err: unknown) => {
-      console.warn(
-        `[Audit] Sidecar write failed for comment ${payload.commentId}: ${String(err)}`,
-      );
-    });
 }
 
 // ---------------------------------------------------------------------------
@@ -199,33 +134,26 @@ export async function handleCommentCreate(
   const authorUsername: string = comment.author;
 
   try {
-    const openrouterKey = await getOpenRouterApiKey();
+    const result = await analyzeWithAI(commentBody);
 
-    if (!openrouterKey) {
-      return {
-        status: 'error',
-        message:
-          'OpenRouter API key is not configured. A subreddit moderator must set the key in the App Directory settings dashboard before the bot can evaluate comments.',
-      };
-    }
-
-    const result = await analyzeWithAI(openrouterKey, commentBody);
-
-    // Fire-and-forget audit log (never blocks the moderation action)
-    logToAuditTrail({
-      commentId,
-      author: authorUsername,
-      body: commentBody,
-      violatesRules: result.violatesRules,
-      reason: result.reason,
-    });
+    console.log(
+      `[MODERATION] commentId=${commentId} author=${authorUsername} ` +
+        `violatesRules=${result.violatesRules} reason="${result.reason}"`,
+    );
 
     if (result.violatesRules) {
       assertT1(commentId);
       const commentModel = await reddit.getCommentById(commentId);
 
+      const prefix = '[Context Guardian Bot]: ';
+      const maxReasonLen = prefix.length > 99 ? 0 : 99 - prefix.length;
+      const trimmedReason =
+        result.reason.length > maxReasonLen
+          ? result.reason.slice(0, maxReasonLen - 3) + '...'
+          : result.reason;
+
       await reddit.report(commentModel, {
-        reason: `[Context Guardian Bot Warning]: ${result.reason}`,
+        reason: `${prefix}${trimmedReason}`,
       });
 
       return {

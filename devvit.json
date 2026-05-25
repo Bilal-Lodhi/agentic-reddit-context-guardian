@@ -47,6 +47,14 @@
       }
     }
   },
+  "permissions": {
+    "http": {
+      "enable": true,
+      "domains": [
+        "generativelanguage.googleapis.com"
+      ]
+    }
+  },
   "triggers": {
     "onAppInstall": "/internal/triggers/on-app-install",
     "onCommentCreate": "/internal/triggers/on-comment-create"

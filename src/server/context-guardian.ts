@@ -23,6 +23,12 @@ const SYSTEM_INSTRUCTION =
 /** Maximum time (ms) to wait for a Gemini API response before giving up. */
 const GEMINI_TIMEOUT_MS = 4000;
 
+/** Maximum number of retry attempts for transient failures (429, 5xx). */
+const GEMINI_MAX_RETRIES = 3;
+
+/** Base delay between retries in ms. Doubles each attempt with jitter. */
+const GEMINI_BASE_DELAY_MS = 800;
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -50,6 +56,13 @@ async function getApiKey(): Promise<string> {
 }
 
 /**
+ * Simple promise-based sleep.
+ */
+async function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
  * Call the Google Gemini API via Devvit's sanctioned `fetch`.
  * `generativelanguage.googleapis.com` is on the global Devvit allowlist.
  */
@@ -68,67 +81,96 @@ async function analyzeWithAI(
 
   const requestBody = buildGeminiRequestBody(SYSTEM_INSTRUCTION, commentBody);
 
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), GEMINI_TIMEOUT_MS);
+  let lastError: Error | undefined;
 
-  let response: Response;
-  try {
-    response = await fetch(geminiUrl(apiKey), {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(requestBody),
-      signal: controller.signal,
-    });
-  } finally {
-    clearTimeout(timeoutId);
+  for (let attempt = 0; attempt <= GEMINI_MAX_RETRIES; attempt++) {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), GEMINI_TIMEOUT_MS);
+
+    let response: Response;
+    try {
+      response = await fetch(geminiUrl(apiKey), {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(requestBody),
+        signal: controller.signal,
+      });
+    } finally {
+      clearTimeout(timeoutId);
+    }
+
+    // Retry on 429 (rate limit) or 5xx (server error)
+    if (!response.ok) {
+      const errorText = await response.text().catch(() => 'Unknown error');
+      const status = response.status;
+
+      if (
+        attempt < GEMINI_MAX_RETRIES &&
+        (status === 429 || status >= 500)
+      ) {
+        const delay = GEMINI_BASE_DELAY_MS * Math.pow(2, attempt);
+        const jitter = Math.random() * delay * 0.3;
+        console.warn(
+          `[Gemini] Retryable error ${status} (attempt ${attempt + 1}/${GEMINI_MAX_RETRIES + 1}), ` +
+          `backing off ${Math.round(delay + jitter)}ms`,
+        );
+        await sleep(delay + jitter);
+        lastError = new Error(
+          `Gemini API returned status ${status}: ${errorText}`,
+        );
+        continue;
+      }
+
+      throw new Error(
+        `Gemini API returned status ${status}: ${errorText}`,
+      );
+    }
+
+    // Parse the response body
+    const json = (await response.json()) as {
+      candidates?: Array<{
+        content?: { parts?: Array<{ text?: string }> };
+      }>;
+    };
+
+    const rawText = json.candidates?.[0]?.content?.parts?.[0]?.text;
+
+    if (!rawText) {
+      throw new Error('Gemini returned an empty response body');
+    }
+
+    const parsed = JSON.parse(rawText) as {
+      violatesRules: boolean;
+      reason: string;
+    };
+
+    if (typeof parsed.violatesRules !== 'boolean') {
+      throw new Error(
+        'Gemini response missing "violatesRules" boolean field',
+      );
+    }
+    if (typeof parsed.reason !== 'string') {
+      throw new Error('Gemini response missing "reason" string field');
+    }
+
+    const reason = parsed.reason.trim();
+    const normalizedReason =
+      reason.length > 0
+        ? reason
+        : parsed.violatesRules
+          ? 'Content violates community guidelines'
+          : 'Content complies with community guidelines';
+
+    return { violatesRules: parsed.violatesRules, reason: normalizedReason };
   }
 
-  if (!response.ok) {
-    const errorText = await response.text().catch(() => 'Unknown error');
-    throw new Error(
-      `Gemini API returned status ${response.status}: ${errorText}`,
-    );
-  }
-
-  // Gemini generateContent response shape:
-  // { candidates: [{ content: { parts: [{ text: "..." }] } }] }
-  const json = (await response.json()) as {
-    candidates?: Array<{
-      content?: { parts?: Array<{ text?: string }> };
-    }>;
-  };
-
-  const rawText = json.candidates?.[0]?.content?.parts?.[0]?.text;
-
-  if (!rawText) {
-    throw new Error('Gemini returned an empty response body');
-  }
-
-  const parsed = JSON.parse(rawText) as {
-    violatesRules: boolean;
-    reason: string;
-  };
-
-  if (typeof parsed.violatesRules !== 'boolean') {
-    throw new Error(
-      'Gemini response missing "violatesRules" boolean field',
-    );
-  }
-  if (typeof parsed.reason !== 'string') {
-    throw new Error('Gemini response missing "reason" string field');
-  }
-
-  const reason = parsed.reason.trim();
-  const normalizedReason =
-    reason.length > 0
-      ? reason
-      : parsed.violatesRules
-        ? 'Content violates community guidelines'
-        : 'Content complies with community guidelines';
-
-  return { violatesRules: parsed.violatesRules, reason: normalizedReason };
+  // All retries exhausted
+  throw (
+    lastError ??
+    new Error('Gemini API request failed after all retry attempts')
+  );
 }
 
 /**

@@ -67,7 +67,8 @@ npm run build
 > ⚠️ The setting is named `openrouterApiKey` for legacy reasons but **requires a Google Gemini API key** (free at [aistudio.google.com](https://aistudio.google.com)). Your key is encrypted at rest by Reddit and never exposed to users.
 
 ```bash
-npx devvit settings set openrouterApiKey YOUR_GEMINI_API_KEY
+# Run this first — it will prompt you to paste your key:
+npx devvit settings set openrouterApiKey
 ```
 
 ### 3. Playtest on Reddit Sandbox

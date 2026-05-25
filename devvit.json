@@ -10,6 +10,9 @@
       },
       "game": {
         "entry": "game.html"
+      },
+      "audit": {
+        "entry": "audit.html"
       }
     }
   },
@@ -27,16 +30,17 @@
         "endpoint": "/internal/menu/post-create"
       },
       {
-        "label": "Example form",
-        "description": "Show a simple form",
-        "location": "subreddit",
+        "label": "View Audit Log",
+        "description": "View moderation audit trail",
+        "location": ["subreddit", "comment", "post"],
         "forUserType": "moderator",
-        "endpoint": "/internal/menu/example-form"
+        "endpoint": "/internal/menu/audit-log"
       }
     ]
   },
   "forms": {
-    "exampleForm": "/internal/form/example-submit"
+    "exampleForm": "/internal/form/example-submit",
+    "auditLogForm": "/internal/form/example-submit"
   },
   "settings": {
     "global": {

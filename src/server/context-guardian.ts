@@ -1,5 +1,5 @@
 import { assertT1 } from '@devvit/shared';
-import { reddit, settings } from '@devvit/web/server';
+import { redis, reddit, settings } from '@devvit/web/server';
 import type { OnCommentCreateRequest } from '@devvit/web/shared';
 import { GEMINI_MODEL, buildGeminiRequestBody } from '../shared/openrouter-config';
 
@@ -8,6 +8,12 @@ import { GEMINI_MODEL, buildGeminiRequestBody } from '../shared/openrouter-confi
 // ---------------------------------------------------------------------------
 
 const SETTINGS_KEY = 'openrouterApiKey';
+
+/** Redis key prefix for audit trail entries. */
+const AUDIT_KEY_PREFIX = 'audit:log:';
+
+/** Store audit logs in Redis for 30 days before auto-expiry. */
+const AUDIT_REDIS_TTL_SECONDS = 30 * 24 * 60 * 60;
 
 const SYSTEM_INSTRUCTION =
   'You are an autonomous AI content moderator. Evaluate content. ' +
@@ -113,6 +119,44 @@ async function analyzeWithAI(
   return { violatesRules: parsed.violatesRules, reason: normalizedReason };
 }
 
+/**
+ * Persist a moderation audit log entry to Devvit Redis.
+ * Each comment gets one key: `audit:log:<commentId>`.
+ * The value is a JSON snapshot of the moderation decision.
+ * Keys auto-expire after 30 days.
+ */
+async function logToAuditTrail(payload: {
+  commentId: string;
+  author: string;
+  body: string;
+  violatesRules: boolean;
+  reason: string;
+}): Promise<void> {
+  const key = `${AUDIT_KEY_PREFIX}${payload.commentId}`;
+  const value = JSON.stringify({
+    commentId: payload.commentId,
+    author: payload.author,
+    body: payload.body,
+    violatesRules: payload.violatesRules,
+    reason: payload.reason,
+    evaluatedAt: new Date().toISOString(),
+  });
+
+  await redis.set(key, value, {
+    expiration: new Date(Date.now() + AUDIT_REDIS_TTL_SECONDS * 1000),
+  });
+
+  // Add to sorted-set index so the audit viewer can list recent entries.
+  const timestamp = Date.now();
+  await redis.zAdd('audit:index', { member: key, score: timestamp });
+
+  // Expire the audit:index key on the same schedule as the entries themselves.
+  // (If all entries expire, the index is cleaned too.)
+  await redis.expire('audit:index', AUDIT_REDIS_TTL_SECONDS);
+
+  console.log(`[Audit] Redis write OK: key=${key} entry=${value}`);
+}
+
 // ---------------------------------------------------------------------------
 // Core trigger handler
 // ---------------------------------------------------------------------------
@@ -135,6 +179,14 @@ export async function handleCommentCreate(
 
   try {
     const result = await analyzeWithAI(commentBody);
+
+    void logToAuditTrail({
+      commentId,
+      author: authorUsername,
+      body: commentBody,
+      violatesRules: result.violatesRules,
+      reason: result.reason,
+    });
 
     console.log(
       `[MODERATION] commentId=${commentId} author=${authorUsername} ` +

@@ -155,6 +155,45 @@ async function main(): Promise<void> {
 
   await connectMongo();
 
+  app.post('/api/audit-log', async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { commentId, author, body, violatesRules, reason, evaluatedAt } = req.body as {
+        commentId: string;
+        author: string;
+        body: string;
+        violatesRules: boolean;
+        reason: string;
+        evaluatedAt: string;
+      };
+
+      if (!commentId || !author || !body || typeof violatesRules !== 'boolean' || !reason) {
+        res.status(400).json({ error: 'Missing required audit fields' });
+        return;
+      }
+
+      const logDocument: ModerationLogDocument = {
+        commentId,
+        author,
+        body,
+        violatesRules,
+        reason,
+        evaluatedAt: new Date(evaluatedAt),
+      };
+
+      await logToMongo(logDocument);
+
+      console.log(
+        `[AUDIT] commentId=${commentId} author=${author} violatesRules=${violatesRules}`,
+      );
+
+      res.status(200).json({ ok: true });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Unknown error';
+      console.error('POST /api/audit-log error:', message);
+      res.status(500).json({ error: 'Failed to store audit log' });
+    }
+  });
+
   app.post('/api/analyze-comment', async (req: Request, res: Response): Promise<void> => {
     try {
       const { commentId, author, body } = req.body as AnalyzeCommentPayload;

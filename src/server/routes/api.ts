@@ -1,6 +1,8 @@
 import { Hono } from 'hono';
 import { context, redis, reddit } from '@devvit/web/server';
 import type {
+  AuditEntry,
+  AuditLogResponse,
   DecrementResponse,
   IncrementResponse,
   InitResponse,
@@ -70,6 +72,41 @@ api.post('/increment', async (c) => {
     postId,
     type: 'increment',
   });
+});
+
+api.get('/audit-entries', async (c) => {
+  try {
+    // Fetch the 100 most recent audit key names via the sorted set index,
+    // ordered by score descending (newest first).
+    const members = await redis.zRange('audit:index', 0, 99, {
+      by: 'rank',
+      reverse: true,
+    });
+
+    if (!members || members.length === 0) {
+      return c.json<AuditLogResponse>({ entries: [], total: 0 });
+    }
+
+    const keys = members.map((m) => m.member);
+    const entries: Array<AuditEntry> = [];
+
+    // Fetch each entry. Devvit does not expose mget, so we loop.
+    for (const key of keys) {
+      const raw = await redis.get(key);
+      if (raw) {
+        try {
+          entries.push(JSON.parse(raw) as AuditEntry);
+        } catch {
+          // skip malformed entries
+        }
+      }
+    }
+
+    return c.json<AuditLogResponse>({ entries, total: entries.length });
+  } catch (err) {
+    console.error('[Audit API] Error fetching entries:', String(err));
+    return c.json<AuditLogResponse>({ entries: [], total: 0 }, 500);
+  }
 });
 
 api.post('/decrement', async (c) => {

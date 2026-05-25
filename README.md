@@ -64,11 +64,11 @@ npm run build
 
 ### 2. Set Your Gemini API Key
 
-> ⚠️ The setting is named `openrouterApiKey` for legacy reasons but **requires a Google Gemini API key** (free at [aistudio.google.com](https://aistudio.google.com)). Your key is encrypted at rest by Reddit and never exposed to users.
+> ⚠️ Your Gemini API key is encrypted at rest by Reddit and never exposed to users. Get a free key at [aistudio.google.com](https://aistudio.google.com/apikey).
 
 ```bash
 # Run this first — it will prompt you to paste your key:
-npx devvit settings set openrouterApiKey
+npx devvit settings set geminiApiKey
 ```
 
 ### 3. Playtest on Reddit Sandbox
@@ -106,7 +106,7 @@ mod-helper56/
 │   │   ├── game.html             # Expanded view
 │   │   └── audit.tsx             # Audit log viewer (React + Tailwind)
 │   └── shared/
-│       ├── openrouter-config.ts  # Gemini model config & request builder
+│       ├── gemini-config.ts      # Gemini model config & request builder
 │       └── api.ts                # Shared TypeScript types
 └── tools/                        # Shared tsconfig files
 ```

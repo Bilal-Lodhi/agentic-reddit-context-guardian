@@ -1,13 +1,13 @@
 import { assertT1 } from '@devvit/shared';
 import { redis, reddit, settings } from '@devvit/web/server';
 import type { OnCommentCreateRequest } from '@devvit/web/shared';
-import { GEMINI_MODEL, buildGeminiRequestBody } from '../shared/openrouter-config';
+import { GEMINI_MODEL, buildGeminiRequestBody } from '../shared/gemini-config';
 
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
 
-const SETTINGS_KEY = 'openrouterApiKey';
+const SETTINGS_KEY = 'geminiApiKey';
 
 /** Redis key prefix for audit trail entries. */
 const AUDIT_KEY_PREFIX = 'audit:log:';

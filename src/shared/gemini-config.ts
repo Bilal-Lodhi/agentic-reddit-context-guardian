@@ -16,8 +16,8 @@
  *     'gemini-2.5-pro'       ← Stronger reasoning
  *
  * ⚠️  The API key is read from Devvit App settings (not hardcoded here).
- *     OpenRouter keys route through Google's native endpoint when the
- *     payload matches Google's schema.
+ *     The Gemini API key must be configured in the App Directory settings
+ *     dashboard before the bot can evaluate comments.
  */
 
 // ── MODEL ─────────────────────────────────────────────────────────────────
